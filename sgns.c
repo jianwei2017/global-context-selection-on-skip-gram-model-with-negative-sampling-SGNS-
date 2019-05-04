@@ -403,7 +403,7 @@ void Create_Table(char *filename){
     char tmp2[(MAX_SENTENCE_LENGTH<<2) + 1];
     long long a, wid, j,uid,w_uid,u_wid;
     FILE *fin;
-    fin = fopen(filename, "rb");
+    fin = fopen64(filename, "rb");
     if (fin == NULL)
     {
         printf("ERROR: %s not found!\n",filename);
@@ -577,7 +577,7 @@ void LearnVocabFromTrainFile()
         printf("Union file doesn't exist!");
         exit(0);
     }
-    funion = fopen(Union_file,"wb");
+    funion = fopen64(Union_file,"wb");
     if(Dir_name[0] == 0){
         Create_Table(train_file);
     }else {
@@ -609,7 +609,7 @@ void LearnVocabFromTrainFile()
 void SaveVocab()
 {
     long long i;
-    FILE *fo = fopen(save_vocab_file, "wb");
+    FILE *fo = fopen64(save_vocab_file, "wb");
     for (i = 0; i < vocab_size; i++) fprintf(fo, "%s %lld\n", vocab[i].word, vocab[i].cn);
     fclose(fo);
 }
@@ -619,7 +619,7 @@ void ReadVocab()
     long long a, i = 0;
     char c, eof = 0;
     char word[MAX_STRING];
-    FILE *fin = fopen(read_vocab_file, "rb");
+    FILE *fin = fopen64(read_vocab_file, "rb");
     if (fin == NULL)
     {
         printf("Vocabulary file not found\n");
@@ -641,7 +641,7 @@ void ReadVocab()
         printf("Vocab size: %lld\n", vocab_size);
         printf("Words in train file: %lld\n", train_words);
     }
-    fin = fopen(train_file, "rb");
+    fin = fopen64(train_file, "rb");
     if (fin == NULL)
     {
         printf("ERROR: training data file not found!\n");
@@ -663,7 +663,7 @@ void *TrainModel(void *id)
     char eof = 0;
     double *neu1 = (double *)calloc(layer1_size, sizeof(double));
     double *neu1e = (double *)calloc(layer1_size, sizeof(double));
-    FILE *fi = fopen(Union_file, "rb");
+    FILE *fi = fopen64(Union_file, "rb");
     fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
 
     while(1)
@@ -793,7 +793,7 @@ void Train()
     for (a = 0; a < num_threads; a++) pthread_join(pt[a], NULL);
 
 
-    fo = fopen(output_file, "wb");
+    fo = fopen64(output_file, "wb");
 
     // Save the word vectors
     fprintf(fo, "%lld %lld\n", vocab_size, layer1_size); // ´Ê»ãÁ¿£¬vectorÎ¬Êý
