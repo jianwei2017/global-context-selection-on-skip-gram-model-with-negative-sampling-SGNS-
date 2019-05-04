@@ -3,6 +3,10 @@
 #include <string.h>
 #include <math.h>
 #include <pthread.h>
+#include <dirent.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #define MAX_STRING 100
 #define EXP_TABLE_SIZE 1000
@@ -10,7 +14,7 @@
 #define MAX_SENTENCE_LENGTH 1000
 #define MAX_CODE_LENGTH 40
 #define MAX_WINDOW_SIZE 11
-
+#define PATH_LEN 1000
 const int vocab_hash_size = 30000000;
 
 struct node
@@ -29,7 +33,8 @@ struct vocab_word
     node *next;
 };
 
-char train_file[MAX_STRING],output_file[MAX_STRING];
+char train_file[MAX_STRING],output_file[MAX_STRING],Dir_name[MAX_STRING];
+char Union_file[MAX_STRING];
 char save_vocab_file[MAX_STRING],read_vocab_file[MAX_STRING];
 struct vocab_word *vocab;
 struct vocab_word *pair;
@@ -56,6 +61,7 @@ long long pair_max_size=1000;
 double *weights;
 double min_weight;
 double threshold;
+FILE *funion;
 
 
 void InitUnigramTable()
@@ -171,6 +177,7 @@ int AddWordToVocab(char *word,int type)
             vocab_max_size += 1000;
             vocab = (struct vocab_word *)realloc(vocab, vocab_max_size * sizeof(struct vocab_word));
         }
+
         hash = GetWordHash(word);
         while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
         vocab_hash[hash] = vocab_size - 1;
@@ -390,36 +397,29 @@ void CalWeight()
     printf("Calculate Finished!\n");
 }
 
-void LearnVocabFromTrainFile()
-{
+void Create_Table(char *filename){
     char word[MAX_STRING], eof = 0;
-    FILE *fin;
     char tmp[(MAX_SENTENCE_LENGTH<<2) + 1];
     char tmp2[(MAX_SENTENCE_LENGTH<<2) + 1];
     long long a, wid, j,uid,w_uid,u_wid;
-    for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
-    for (a = 0; a < vocab_hash_size; a++) pair_hash[a] = -1;
-    fin = fopen(train_file, "rb");
+    FILE *fin;
+    fin = fopen(filename, "rb");
     if (fin == NULL)
     {
-        printf("ERROR: training data file not found!\n");
+        printf("ERROR: %s not found!\n",filename);
         exit(1);
     }
-    vocab_size = 0;
-    pair_size = 0;
-    pairnum = 0;
-    AddWordToVocab((char *)"</s>", 1);
-
     long long cnt=0;
 
     while (1)
     {
         ReadWord(word, fin, &eof);
+        fprintf(funion,"%s ",word);
         if (eof) break;
         train_words++;
         if ((debug_mode > 1) && (train_words % 100000 == 0))
         {
-            printf("%lldK_%lld%c", train_words / 1000, cnt, 13);
+            printf("%lldK%c", train_words / 1000, 13);
             fflush(stdout);
         }
         wid = SearchVocab(word, 1);
@@ -500,9 +500,97 @@ void LearnVocabFromTrainFile()
             strcpy(words[train_words % window], word);
         }
     }
-    printf("Read Finished!\n");
-    file_size = ftell(fin);
+    file_size += ftell(fin);
     fclose(fin);
+
+}
+
+void dir_scan(const char *path, const char *file)
+{
+    struct stat s;
+    DIR *dir;
+    struct dirent *dt;
+    char dirname[PATH_LEN];
+    char THEFILE[PATH_LEN];
+
+    memset(dirname, 0, PATH_LEN*sizeof(char));
+    strcpy(dirname, path);
+
+
+    if(stat(file, &s) < 0)
+    {
+        printf("lstat error\n ");
+        exit(1);
+    }
+
+    if(S_ISDIR(s.st_mode))
+    {
+        strcpy(dirname+strlen(dirname), file);
+        strcpy(dirname+strlen(dirname), "/");
+        if((dir = opendir(file)) == NULL)
+        {
+            printf( "opendir %s/%s error\n ",dirname,file);
+            exit(1);
+        }
+
+        if(chdir(file) < 0)
+        {
+            printf( "chdir error\n ");
+            exit(1);
+        }
+
+        while((dt = readdir(dir)) != NULL)
+        {
+            if(dt-> d_name[0] == '.')
+            {
+                continue;
+            }
+            dir_scan(dirname, dt-> d_name);
+        }
+
+        if(chdir( "..") < 0)
+        {
+            printf( "chdir error\n ");
+            exit(1);
+        }
+    }
+    else
+    {
+        strcpy(THEFILE,file);
+        Create_Table(THEFILE);
+    }
+
+}
+
+void LearnVocabFromTrainFile()
+{
+    char curdir[PATH_LEN];
+    long long a;
+    for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
+    for (a = 0; a < vocab_hash_size; a++) pair_hash[a] = -1;
+    vocab_size = 0;
+    pair_size = 0;
+    pairnum = 0;
+    AddWordToVocab((char *)"</s>", 1);
+
+    if(Union_file[0] == 0){
+        printf("Union file doesn't exist!");
+        exit(0);
+    }
+    funion = fopen(Union_file,"wb");
+    if(Dir_name[0] == 0){
+        Create_Table(train_file);
+    }else {
+        getcwd(curdir,sizeof(curdir));
+        dir_scan("",Dir_name);
+        if(chdir(curdir)<0)
+        {
+            printf( "chdir error\n ");
+            exit(1);
+        }
+
+    }
+    fclose(funion);
     SortVocab();
     printf("SortVocab!!\n");
 
@@ -511,7 +599,6 @@ void LearnVocabFromTrainFile()
         CalWeight();
         printf("CalWeight!!\n");
     }
-
     if (debug_mode > 0)
     {
         printf("Vocab size: %lld\n", vocab_size);
@@ -561,7 +648,7 @@ void ReadVocab()
         exit(1);
     }
     fseek(fin, 0, SEEK_END);
-    file_size = ftell(fin);
+    file_size += ftell(fin);
     fclose(fin);
 }
 
@@ -574,10 +661,10 @@ void *TrainModel(void *id)
     double f, g;
     clock_t now;
     char eof = 0;
-    double *neu1 = (double *)calloc(layer1_size, sizeof(double)); // 隐层节点
-    double *neu1e = (double *)calloc(layer1_size, sizeof(double));  // 误差累计项，其实对应的是Gneu1
-    FILE *fi = fopen(train_file, "rb");
-    fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET); // 将文件内容分配给各个线程
+    double *neu1 = (double *)calloc(layer1_size, sizeof(double));
+    double *neu1e = (double *)calloc(layer1_size, sizeof(double));
+    FILE *fi = fopen(Union_file, "rb");
+    fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
 
     while(1)
     {
@@ -689,7 +776,8 @@ void Train()
     FILE *fo;
 
     pthread_t *pt = (pthread_t *)malloc(num_threads * sizeof(pthread_t));
-    printf("Starting training using file %s\n", train_file);
+    if(Dir_name[0] == 0) printf("Starting training using file %s\n", train_file);
+    else printf("Starting training using files in %s\n", Dir_name);
     starting_alpha = alpha;
 
     if (read_vocab_file[0] != 0) ReadVocab();
@@ -700,9 +788,10 @@ void Train()
 
     InitNet();
     InitUnigramTable();
-    start = clock();  // 开始计时 //该程序从启动到函数调用占用CPU的时间
+    start = clock();
     for (a = 0; a < num_threads; a++) pthread_create(&pt[a], NULL, TrainModel, (void *)a);
     for (a = 0; a < num_threads; a++) pthread_join(pt[a], NULL);
+
 
     fo = fopen(output_file, "wb");
 
@@ -745,53 +834,60 @@ int methodchoice(char *methodname)
 int main(int argc,char **argv)
 {
     int i;
+    struct stat s;
+
     if (argc == 1)
     {
         printf("Options:\n");
         printf("Parameters for training:\n");
-        printf("\t-train <file>\n"); // 指定训练文件
+        printf("\t-dir <dir>\n");
+        printf("\t\tUse all data from <dir> to train the model\n");
+        printf("\t-union <file>\n");
+        printf("\t\tUnion all data from <dir> to <file>\n");
+        printf("\t-train <file>\n");
         printf("\t\tUse text data from <file> to train the model\n");
-        printf("\t-output <file>\n"); // 指定输出文件，以存储word vectors，或者单词类
+        printf("\t-output <file>\n");
         printf("\t\tUse <file> to save the resulting word vectors / word clusters\n");
-        printf("\t-size <int>\n"); // word vector的维数，对应 layer1_size，默认是100
+        printf("\t-size <int>\n");
         printf("\t\tSet size of word vectors; default is 100\n");
         printf("\t-window <int>\n");
         printf("\t\tSet max skip length between words,range from 5 to 10; default is 5\n");
-        printf("\t-sample <float>\n");  // 亚采样拒绝概率的参数
+        printf("\t-sample <float>\n");
         printf("\t\tSet threshold for occurrence of words. Those that appear with higher frequency in the training data\n");
         printf("\t\twill be randomly down-sampled; default is 1e-3, useful range is (0, 1e-5)\n");
-        printf("\t-negative <int>\n"); // 使用ns的时候采样的样本数
+        printf("\t-negative <int>\n");
         printf("\t\tNumber of negative examples; default is 5, common values are 3 - 10 (0 = not used)\n");
-        printf("\t-threads <int>\n"); // 指定线程数
+        printf("\t-threads <int>\n");
         printf("\t\tUse <int> threads (default 12)\n");
         printf("\t-iter <int>\n");
         printf("\t\tRun more training iterations (default 5)\n");
-        printf("\t-min-count <int>\n");  // 长尾词的词频阈值
+        printf("\t-min-count <int>\n");
         printf("\t\tThis will discard words that appear less than <int> times; default is 5\n");
-        printf("\t-alpha <float>\n"); // 初始的学习速率，默认为0.025
+        printf("\t-alpha <float>\n");
         printf("\t\tSet the starting learning rate; default is 0.025 for skip-gram\n");
-        printf("\t-save-vocab <file>\n"); // 词汇表存储文件
+        printf("\t-save-vocab <file>\n");
         printf("\t\tThe vocabulary will be saved to <file>\n");
-        printf("\t-read-vocab <file>\n");  // 词汇表加载文件，则可以不指定trainfile
+        printf("\t-read-vocab <file>\n");
         printf("\t\tThe vocabulary will be read from <file>, not constructed from the training data\n");
         printf("\t-method\n");
         printf("\t\tSet the feature selection method; default is document frequency thresholding(DF)\n");
         printf("\t\tThe optional parameters are: DF -- document frequency, IG -- Imformation Gain, \n\t\tMI -- Mutual infomation, CHI -- CHI-test\n");
         printf("\t-threshold\n");
-        printf("\t\tSet the filter threshold; default is 0.7\n");
-        printf("\nExamples:\n");  // 使用示例
-        printf("./sgns.exe -train data.txt -output vec.txt -size 200 -window 5 -sample 1e-4 -negative 5 -method DF\n\n");
+        printf("\t\tSet the filter threshold; default is 0.7; the range is 0 - 1\n");
+        printf("\nExamples:\n");
+        printf("./sgns.exe -train data.txt -output vec.txt -size 200 -window 5 -sample 1e-4 -negative 5 -method DF\n");
+        printf("./sgns.exe -dir Data -output vec.txt -size 200 -method IG -threshold 0.9\n\n");
         return 0;
     }
 
-    // 文件名均空
     output_file[0] = 0;
     save_vocab_file[0] = 0;
     read_vocab_file[0] = 0;
+    Union_file[0] = 0;
+    Dir_name[0] = 0;
     methodnum = 1;
     threshold = 0.7;
 
-    // 参数与变量的对应关系
     if ((i = ArgPos((char *)"-size", argc, argv)) > 0) layer1_size = atoi(argv[i + 1]);
     if ((i = ArgPos((char *)"-train", argc, argv)) > 0) strcpy(train_file, argv[i + 1]);
     if ((i = ArgPos((char *)"-save-vocab", argc, argv)) > 0) strcpy(save_vocab_file, argv[i + 1]);
@@ -806,11 +902,31 @@ int main(int argc,char **argv)
     if ((i = ArgPos((char *)"-threads", argc, argv)) > 0) num_threads = atoi(argv[i + 1]);
     if ((i = ArgPos((char *)"-method",argc,argv)) > 0) methodnum = methodchoice(argv[i + 1]);
     if ((i = ArgPos((char *)"-threshold",argc,argv)) > 0) threshold = atof(argv[i + 1]);
+    if ((i = ArgPos((char *)"-union",argc,argv)) > 0) strcpy(Union_file, argv[i + 1]);
+    if ((i = ArgPos((char *)"-dir",argc,argv)) > 0 ) {
+            strcpy(Dir_name,argv[i+1]);
+            if(stat(Dir_name, &s) < 0){
+                printf("lstat error!\n");
+                return 0;
+            }
+            if(!S_ISDIR(s.st_mode))
+            {
+                printf("%s is not a dir name\n",Dir_name);
+                return 0;
+            }
+    }
+
     if(methodnum < 0 )
     {
         printf("This method doesn't exist!\n");
         return 0;
     }
+    if(threshold < 0 || threshold > 1)
+    {
+        printf("The threshold is beyond range!\n");
+        return 0;
+    }
+
     vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word));
     pair = (struct vocab_word *)calloc(pair_max_size, sizeof(struct vocab_word));
     vocab_hash = (int *)calloc(vocab_hash_size, sizeof(int));
