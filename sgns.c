@@ -58,7 +58,7 @@ int *pair_hash;
 long long pair_size=0;
 char words[MAX_WINDOW_SIZE][MAX_STRING];
 double totalw=0;
-long long pair_max_size=1000;
+long long pair_max_size=10000;
 double *weights;
 double min_weight;
 double threshold;
@@ -145,7 +145,7 @@ int SearchVocab(char *word, int type)
         {
             if (pair_hash[hash] == -1) return -1;
             if (!strcmp(word, pair[pair_hash[hash]].word)) return pair_hash[hash];
-	    hash = (hash + 1) % (vocab_hash_size * 3);
+	    hash = (hash + 1) % (vocab_hash_size << 3);
         }
     }
     return -1;
@@ -198,7 +198,7 @@ int AddWordToVocab(char *word,int type)
             pair = (struct vocab_word *)realloc(pair, pair_max_size * sizeof(struct vocab_word));
         }
         hash = GetWordHash(word);
-        while (pair_hash[hash] != -1) hash = (hash + 1) % (vocab_hash_size << 2);
+        while (pair_hash[hash] != -1) hash = (hash + 1) % (vocab_hash_size << 3);
         pair_hash[hash] = pair_size - 1;
         return pair_size - 1;
     }
@@ -579,7 +579,7 @@ void LearnVocabFromTrainFile()
     char curdir[PATH_LEN];
     long long a;
     for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
-    for (a = 0; a < vocab_hash_size << 2; a++) pair_hash[a] = -1;
+    for (a = 0; a < vocab_hash_size << 3; a++) pair_hash[a] = -1;
     vocab_size = 0;
     pair_size = 0;
     pairnum = 0;
@@ -950,7 +950,7 @@ int main(int argc,char **argv)
     vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word));
     pair = (struct vocab_word *)calloc(pair_max_size, sizeof(struct vocab_word));
     vocab_hash = (int *)calloc(vocab_hash_size, sizeof(int));
-    pair_hash = (int *)calloc(vocab_hash_size << 2, sizeof(int));
+    pair_hash = (int *)calloc(vocab_hash_size << 3, sizeof(int));
     expTable = (double *)malloc((EXP_TABLE_SIZE + 1) * sizeof(double));
 
     for (i = 0; i < EXP_TABLE_SIZE; i++)
