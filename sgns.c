@@ -51,7 +51,8 @@ int negative = 5;
 const int table_size = 1e8;
 int *table;
 
-int methodnum,pairnum;
+int methodnum;
+long long pairnum;
 int *Delete;
 int *pair_hash;
 long long pair_size=0;
@@ -138,13 +139,14 @@ int SearchVocab(char *word, int type)
         {
             if (vocab_hash[hash] == -1) return -1;
             if (!strcmp(word, vocab[vocab_hash[hash]].word)) return vocab_hash[hash];
+	    hash = (hash + 1) % vocab_hash_size;
         }
         else if(type == 2)
         {
             if (pair_hash[hash] == -1) return -1;
             if (!strcmp(word, pair[pair_hash[hash]].word)) return pair_hash[hash];
+	    hash = (hash + 1) % (vocab_hash_size * 3);
         }
-        hash = (hash + 1) % vocab_hash_size;
     }
     return -1;
 }
@@ -196,7 +198,7 @@ int AddWordToVocab(char *word,int type)
             pair = (struct vocab_word *)realloc(pair, pair_max_size * sizeof(struct vocab_word));
         }
         hash = GetWordHash(word);
-        while (pair_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
+        while (pair_hash[hash] != -1) hash = (hash + 1) % (vocab_hash_size << 2);
         pair_hash[hash] = pair_size - 1;
         return pair_size - 1;
     }
@@ -288,7 +290,17 @@ void ReduceVocab()
             vocab[b].word = vocab[a].word;
             b++;
         }
-        else free(vocab[a].word);
+        else {
+		node *NEXT, *tem;
+		NEXT = vocab[a].next;
+		while(NEXT != NULL)
+		{
+			tem = NEXT;
+			NEXT = NEXT->next;
+			free(tem);
+		}	
+		free(vocab[a].word);
+	}
     vocab_size = b;
     for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
     for (a = 0; a < vocab_size; a++)
@@ -300,6 +312,7 @@ void ReduceVocab()
     fflush(stdout);
     min_reduce++;
 }
+
 
 void InitNet()
 {
@@ -414,12 +427,15 @@ void Create_Table(char *filename){
     while (1)
     {
         ReadWord(word, fin, &eof);
-        fprintf(funion,"%s ",word);
+        if(Union_file[0] != 0)
+	{
+	    fprintf(funion,"%s ",word);
+        };
         if (eof) break;
         train_words++;
         if ((debug_mode > 1) && (train_words % 100000 == 0))
         {
-            printf("%lldK%c", train_words / 1000, 13);
+            printf("words:%lldKvaocab:%lldpairs:%lld%c", train_words / 1000, vocab_size, cnt, 13);
             fflush(stdout);
         }
         wid = SearchVocab(word, 1);
@@ -491,10 +507,6 @@ void Create_Table(char *filename){
                     else pair[u_wid].cn++;
 
                     pairnum += 2;
-                    if (pair_size > vocab_hash_size * 0.7)
-                    {
-                        ReduceVocab();
-                    }
                 }
             }
             strcpy(words[train_words % window], word);
@@ -567,17 +579,18 @@ void LearnVocabFromTrainFile()
     char curdir[PATH_LEN];
     long long a;
     for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
-    for (a = 0; a < vocab_hash_size; a++) pair_hash[a] = -1;
+    for (a = 0; a < vocab_hash_size << 2; a++) pair_hash[a] = -1;
     vocab_size = 0;
     pair_size = 0;
     pairnum = 0;
     AddWordToVocab((char *)"</s>", 1);
 
-    if(Union_file[0] == 0){
+    if(Union_file[0] == 0 && train_file[0] == 0){
         printf("Union file doesn't exist!");
         exit(0);
     }
-    funion = fopen64(Union_file,"wb");
+    if(Union_file[0]!=0)funion = fopen64(Union_file,"wb");
+    
     if(Dir_name[0] == 0){
         Create_Table(train_file);
     }else {
@@ -590,7 +603,7 @@ void LearnVocabFromTrainFile()
         }
 
     }
-    fclose(funion);
+    if(Union_file[0] != 0)fclose(funion);
     SortVocab();
     printf("SortVocab!!\n");
 
@@ -663,7 +676,12 @@ void *TrainModel(void *id)
     char eof = 0;
     double *neu1 = (double *)calloc(layer1_size, sizeof(double));
     double *neu1e = (double *)calloc(layer1_size, sizeof(double));
-    FILE *fi = fopen64(Union_file, "rb");
+    FILE *fi;
+    if(Union_file[0] == 0)
+    {
+	fi = fopen64(train_file,"rb");
+    }
+    else fi = fopen64(Union_file, "rb");
     fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
 
     while(1)
@@ -679,8 +697,8 @@ void *TrainModel(void *id)
             fflush(stdout);
         }
         //auto-modify learning rate
-        alpha = starting_alpha * (1 - word_count_actual / (double)(iter * train_words + 1));  // 自动调整学习速率
-        if (alpha < starting_alpha * 0.0001) alpha = starting_alpha * 0.0001;  // 学习速率有下限
+        alpha = starting_alpha * (1 - word_count_actual / (double)(iter * train_words + 1));
+        if (alpha < starting_alpha * 0.0001) alpha = starting_alpha * 0.0001;
 
         if(sentence_length==0)
         {
@@ -721,7 +739,7 @@ void *TrainModel(void *id)
         next_random = next_random * (unsigned long long)25214903917 + 11;
         b = next_random % window;
 
-        for (a = b; a < window * 2 + 1 - b; a++) if (a != window)   // 预测非中心的单词（邻域内的单词）
+        for (a = b; a < window * 2 + 1 - b; a++) if (a != window) 
         {
             c = sentence_position - window + a;
             if (c < 0) continue;
@@ -780,8 +798,10 @@ void Train()
     else printf("Starting training using files in %s\n", Dir_name);
     starting_alpha = alpha;
 
+    printf("LearnVocabFromTrainFile\n");
     if (read_vocab_file[0] != 0) ReadVocab();
     else LearnVocabFromTrainFile();
+    printf("Learning Finished\n");
 
     if (save_vocab_file[0] != 0) SaveVocab();
     if (output_file[0] == 0) return;
@@ -796,7 +816,7 @@ void Train()
     fo = fopen64(output_file, "wb");
 
     // Save the word vectors
-    fprintf(fo, "%lld %lld\n", vocab_size, layer1_size); // 词汇量，vector维数
+    fprintf(fo, "%lld %lld\n", vocab_size, layer1_size);
     for (a = 0; a < vocab_size; a++)
     {
         fprintf(fo, "%s ", vocab[a].word);
@@ -930,7 +950,7 @@ int main(int argc,char **argv)
     vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word));
     pair = (struct vocab_word *)calloc(pair_max_size, sizeof(struct vocab_word));
     vocab_hash = (int *)calloc(vocab_hash_size, sizeof(int));
-    pair_hash = (int *)calloc(vocab_hash_size, sizeof(int));
+    pair_hash = (int *)calloc(vocab_hash_size << 2, sizeof(int));
     expTable = (double *)malloc((EXP_TABLE_SIZE + 1) * sizeof(double));
 
     for (i = 0; i < EXP_TABLE_SIZE; i++)
