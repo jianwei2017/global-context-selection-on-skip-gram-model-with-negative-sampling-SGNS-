@@ -28,6 +28,15 @@ class sgns_word_count {
     	Outputnum = 0;
     	Method = "IG";
     	for(int i=0;i<args.length;i++) {
+    		if(args[i] == "-train") {
+    			trainingDataFilePath = args[i+1];
+    		}
+    		if(args[i] == "-model") {
+    			modelFilePath = args[i+1];
+    		}
+    		if(args[i] == "-ouput") {
+    			outputFilePath = args[i+1];
+    		}
     		if(args[i] == "-window") {
     			Matcher isNum = pattern.matcher(args[i+1]);
     			if( !isNum.matches() ){
@@ -47,6 +56,7 @@ class sgns_word_count {
     			}
     		}
     	}
+    	LearnVocabFromCorpus();
     	LearnFromCorpus();
         long endTime = System.currentTimeMillis(); 
         System.out.println("程序运行时间：" + (endTime - startTime) + "ms");
@@ -108,9 +118,9 @@ class sgns_word_count {
         	String key = OutIter.next();
         	double value = wordweight.get(key);
         	long count = wordcount.get(key);
+        	if(count < 5) continue;
         	try {
         		bw.append(key + "\t" + count +"\t" + value + "\r\n");
-                
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -153,10 +163,7 @@ class sgns_word_count {
         w_ucount.clear();
 	}
 	
-	public static void LearnFromCorpus()
-	{
-		String [] circur = new String[11];
-		long startTime2 = System.currentTimeMillis(); 
+	public static void LearnVocabFromCorpus() {
 		try {
 			FileInputStream inputstream = new FileInputStream(trainingDataFilePath);
 			BufferedReader bufferreader = new BufferedReader(new InputStreamReader(inputstream,"UTF-8"));
@@ -166,29 +173,56 @@ class sgns_word_count {
 				String [] words = line.split("\\ |\t");
 				for(int i=0;i<words.length;i++) {
 					if(word_num % 100000 == 0) {
+						System.out.print("\tword_num : " + word_num/1000 + "K " +"\n");
+					}
+					if(wordcount.get(words[i]) == null) wordcount.put(words[i],1L);
+					else wordcount.put(words[i],wordcount.get(words[i])+1L);
+					word_num++;
+				}
+				line = bufferreader.readLine();
+			}
+			inputstream.close();
+		}catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	public static void LearnFromCorpus()
+	{
+		String [] circur = new String[11];
+		int num=0;
+		long startTime2 = System.currentTimeMillis(); 
+		try {
+			FileInputStream inputstream = new FileInputStream(trainingDataFilePath);
+			BufferedReader bufferreader = new BufferedReader(new InputStreamReader(inputstream,"UTF-8"));
+			String line;
+			line = bufferreader.readLine();
+			while(line!=null) {
+				String [] words = line.split("\\ |\t");
+				for(int i=0;i<words.length;i++) {
+					if(wordcount.get(words[i]) < 5) continue;
+					if(num % 100000 == 0) {
 						long endTime2 = System.currentTimeMillis();
 						long TIME = endTime2 - startTime2;
 						if(TIME > 60000) {
 							System.out.println("output");
 							OutputPair();
 						}
-						System.out.print("\tword_num : " + word_num/1000 + "K " + "pair_num : " + w_ucount.size() +"\n");
+						System.out.print("\tword_num : " + num/1000 + "K " + "pair_num : " + w_ucount.size() +"\n");
 						startTime2 = System.currentTimeMillis(); 
 					}
-					if(wordcount.get(words[i]) == null) wordcount.put(words[i],1L);
-					else wordcount.put(words[i],wordcount.get(words[i])+1);
-					
 					if(words.length - i <= window_size) {
 						circur[(int)window_size + i - words.length] = words[i];
 					}
 					for(int j=1;j<=window_size;j++) {
 						int uid = i-j;
 						if(uid < 0) {
-							if(word_num<window_size) {
+							if(num<window_size) {
 								break;
 							}
 							else {
 								uid = uid + (int)window_size;
+								if(wordcount.get(circur[uid]) == null || wordcount.get(circur[uid]) <5) continue;
 								String tem = words[i]+" "+circur[uid];
 								if(w_ucount.get(tem) == null) w_ucount.put(tem,1L);
 								else w_ucount.put(tem,w_ucount.get(tem)+1);
@@ -200,6 +234,7 @@ class sgns_word_count {
 								continue;
 							}
 						}
+						if(wordcount.get(words[uid]) < 5) continue;
 						String tem = words[i]+" "+words[uid];
 						if(w_ucount.get(tem) == null) w_ucount.put(tem,1L);
 						else w_ucount.put(tem,w_ucount.get(tem)+1);
@@ -209,7 +244,7 @@ class sgns_word_count {
 						else w_ucount.put(tem,w_ucount.get(tem)+1);
 						pair_num += 2;
 					}
-					word_num++;
+					num++;
 				}
 				line = bufferreader.readLine();
 			}
