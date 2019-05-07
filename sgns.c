@@ -16,28 +16,20 @@
 #define MAX_WINDOW_SIZE 11
 #define PATH_LEN 1000
 const int vocab_hash_size = 30000000;
+const int pair_hash_size = 30000000;
 
-struct node
-{
-    int wordid;
-    int stringid;
-    node *next;
-};
 
 struct vocab_word
 {
     long long cn;
-    long long cwu;
     double w;
     char *word;
-    node *next;
 };
 
 char train_file[MAX_STRING],output_file[MAX_STRING],Dir_name[MAX_STRING];
 char Union_file[MAX_STRING];
 char save_vocab_file[MAX_STRING],read_vocab_file[MAX_STRING];
 struct vocab_word *vocab;
-struct vocab_word *pair;
 
 int window = 5,min_count = 5,num_threads = 12,num_reduce =1,min_reduce=1;
 int debug_mode = 2;
@@ -49,16 +41,14 @@ double *syn0, *syn1, *syn1neg, *expTable;
 clock_t start;
 int negative = 5;
 const int table_size = 1e8;
-int *table;
 
+int *table;
 int methodnum;
+char pairfile[MAX_STRING];
 long long pairnum;
+int pair_size;
 int *Delete;
-int *pair_hash;
-long long pair_size=0;
-char words[MAX_WINDOW_SIZE][MAX_STRING];
 double totalw=0;
-long long pair_max_size=10000;
 double *weights;
 double min_weight;
 double threshold;
@@ -130,23 +120,14 @@ int GetWordHash(char *word)
     return hash;
 }
 
-int SearchVocab(char *word, int type)
+int SearchVocab(char *word)
 {
     unsigned int hash = GetWordHash(word);
     while (1)
     {
-        if(type == 1)
-        {
-            if (vocab_hash[hash] == -1) return -1;
-            if (!strcmp(word, vocab[vocab_hash[hash]].word)) return vocab_hash[hash];
+        if (vocab_hash[hash] == -1) return -1;
+        if (!strcmp(word, vocab[vocab_hash[hash]].word)) return vocab_hash[hash];
 	    hash = (hash + 1) % vocab_hash_size;
-        }
-        else if(type == 2)
-        {
-            if (pair_hash[hash] == -1) return -1;
-            if (!strcmp(word, pair[pair_hash[hash]].word)) return pair_hash[hash];
-	    hash = (hash + 1) % (vocab_hash_size << 3);
-        }
     }
     return -1;
 }
@@ -160,48 +141,26 @@ int ReadWordIndex(FILE *fin, char *eof)
         *eof = 1;
         return -1;
     }
-    return SearchVocab(word, 1);
+    return SearchVocab(word);
 }
 
-int AddWordToVocab(char *word,int type)
+int AddWordToVocab(char *word)
 {
     unsigned int hash, length = strlen(word) + 2;
     //if (length > MAX_STRING) length = MAX_STRING;
-    if(type==1)
+    vocab[vocab_size].word = (char *)calloc(length, sizeof(char));
+    strcpy(vocab[vocab_size].word, word);
+    vocab[vocab_size].cn = 0;
+    vocab_size++;
+    if (vocab_size + 2 >= vocab_max_size)
     {
-        vocab[vocab_size].word = (char *)calloc(length, sizeof(char));
-        strcpy(vocab[vocab_size].word, word);
-        vocab[vocab_size].cn = 0;
-        vocab[vocab_size].next = NULL;
-        vocab_size++;
-        if (vocab_size + 2 >= vocab_max_size)
-        {
-            vocab_max_size += 1000;
-            vocab = (struct vocab_word *)realloc(vocab, vocab_max_size * sizeof(struct vocab_word));
-        }
-
-        hash = GetWordHash(word);
-        while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
-        vocab_hash[hash] = vocab_size - 1;
-        return vocab_size - 1;
+        vocab_max_size += 1000;
+        vocab = (struct vocab_word *)realloc(vocab, vocab_max_size * sizeof(struct vocab_word));
     }
-    else if(type == 2)
-    {
-        pair[pair_size].word = (char *)calloc(length, sizeof(char));
-        strcpy(pair[pair_size].word, word);
-        pair[pair_size].cn = 0;
-        pair[pair_size].next = NULL;
-        pair_size++;
-        if (pair_size + 2 >= pair_max_size)
-        {
-            pair_max_size += 1000;
-            pair = (struct vocab_word *)realloc(pair, pair_max_size * sizeof(struct vocab_word));
-        }
-        hash = GetWordHash(word);
-        while (pair_hash[hash] != -1) hash = (hash + 1) % (vocab_hash_size << 3);
-        pair_hash[hash] = pair_size - 1;
-        return pair_size - 1;
-    }
+    hash = GetWordHash(word);
+    while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
+    vocab_hash[hash] = vocab_size - 1;
+    return vocab_size - 1;
 }
 
 int VocabCompare(const void *a, const void *b)
@@ -259,13 +218,6 @@ void SortVocab()
             {
                 Delete[a]=1;
                 vocab_size--;
-                node *tem,*cur;
-                tem = vocab[a].next;
-                while(tem!=NULL){
-                    cur = tem;
-                    tem = tem->next;
-                    free(cur);
-                }
                 free(vocab[a].word);
             }
             else
@@ -280,31 +232,17 @@ void SortVocab()
     }
 }
 
-void ReduceVocab()
-{
-    int a, b = 0;
-    unsigned int hash;
-    for (a = 0; a < vocab_size; a++) if (vocab[a].cn > min_reduce)
-        {
-            vocab[b].cn = vocab[a].cn;
-            vocab[b].word = vocab[a].word;
-            b++;
-        }
-        else {
-		node *NEXT, *tem;
-		NEXT = vocab[a].next;
-		while(NEXT != NULL)
-		{
-			tem = NEXT;
-			NEXT = NEXT->next;
-			free(tem);
-		}	
-		free(vocab[a].word);
-	}
+void ReduceVocab() {
+   int a, b = 0;
+   unsigned int hash;
+   for (a = 0; a < vocab_size; a++) if (vocab[a].cn > min_reduce) {
+        vocab[b].cn = vocab[a].cn;
+        vocab[b].word = vocab[a].word;
+        b++;
+    } else free(vocab[a].word);
     vocab_size = b;
     for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
-    for (a = 0; a < vocab_size; a++)
-    {
+    for (a = 0; a < vocab_size; a++) {
         hash = GetWordHash(vocab[a].word);
         while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
         vocab_hash[hash] = a;
@@ -312,7 +250,6 @@ void ReduceVocab()
     fflush(stdout);
     min_reduce++;
 }
-
 
 void InitNet()
 {
@@ -340,76 +277,6 @@ void InitNet()
             syn0[a * layer1_size + b] = (((next_random & 0xFFFF) / (double)65536) - 0.5) / layer1_size;
         }
 }
-
-void CalWeight()
-{
-    int i;
-    double pw, pu, puw, pu_w, p_w;
-    node *tmp, *tmp2;
-    long long A, B, C, D, N;
-    weights = (double *)malloc(vocab_size * sizeof(double));
-
-    int position = floor(threshold * vocab_size);
-
-    for(i = 0; i < vocab_size; i++)
-    {
-        //printf("wordid : %d\n",i);
-        pw = vocab[i].cn * 1.0 / train_words;
-        tmp = vocab[i].next;
-        double CHI,MI;
-        while(tmp != NULL)
-        {
-            // the word is deleted
-            if(Delete[tmp->wordid] == 1)
-            {
-                tmp2 = tmp;
-                tmp = tmp->next;
-                free(tmp2);
-                continue;
-            }
-            //printf("to wordid: %d word: %s\n",tmp->wordid,vocab[tmp->wordid].word);
-            pu = vocab[tmp->wordid].cn * 1.0 / train_words;
-            // IG
-            if(methodnum == 2)
-            {
-                p_w = 1 - pw;
-                puw = (pair[tmp->stringid].cn * 1.0 / pairnum) / pw;
-                pu_w = ((vocab[tmp->wordid].cwu - pair[tmp->stringid].cn ) * 1.0 / pairnum) / p_w;
-                vocab[i].w += - pu*log(pu) + pw * puw * log(puw) + p_w * pu_w * log(pu_w);
-            }
-            // MI
-            if(methodnum == 3)
-            {
-                A = pair[tmp->stringid].cn;
-                B = vocab[i].cwu - pair[tmp->stringid].cn;
-                C = vocab[tmp->wordid].cwu - pair[tmp->stringid].cn;
-                N = pairnum;
-                MI = log(A * N * 1.0 / ((A + C) * (A + B)));
-                vocab[i].w += pu * MI;
-            }
-            // CHI
-            if(methodnum == 4)
-            {
-                A = pair[tmp->stringid].cn;
-                B = vocab[i].cwu - A;
-                C = vocab[tmp->wordid].cwu - A;
-                D = pairnum - vocab[tmp->wordid].cwu - vocab[i].cwu + A;
-                N = pairnum;
-                CHI = (N * (A * D - C * B) * (A * D - C * B) * 1.0) / ((A + C) * (B + D) * (A + B) * (C + D));
-                vocab[i].w += pu * CHI;
-            }
-            tmp2 = tmp;
-            free(tmp2);
-            tmp = tmp->next;
-        }
-        weights[i] = vocab[i].w;
-        totalw += vocab[i].w;
-    }
-    qsort(&weights[1], vocab_size-1, sizeof(double), WeightsCompare);
-    min_weight = weights[position];
-    printf("Calculate Finished!\n");
-}
-
 void Create_Table(char *filename){
     char word[MAX_STRING], eof = 0;
     char tmp[(MAX_SENTENCE_LENGTH<<2) + 1];
@@ -428,95 +295,29 @@ void Create_Table(char *filename){
     {
         ReadWord(word, fin, &eof);
         if(Union_file[0] != 0)
-	{
-	    fprintf(funion,"%s ",word);
+        {
+            if(strcmp(word,"</s>") == 0){fprintf(funion,"\n");}
+            fprintf(funion,"%s ",word);
         };
         if (eof) break;
         train_words++;
-        if ((debug_mode > 1) && (train_words % 100000 == 0))
+        if ((train_words % 100000 == 0))
         {
-            printf("words:%lldKvaocab:%lldpairs:%lld%c", train_words / 1000, vocab_size, cnt, 13);
+            printf("words:%lldKvaocab:%lld%c", train_words / 1000, vocab_size, 13);
             fflush(stdout);
         }
-        wid = SearchVocab(word, 1);
+        wid = SearchVocab(word);
         if (wid == -1)
         {
-            a = AddWordToVocab(word, 1);
+            a = AddWordToVocab(word);
             vocab[a].cn = 1;
             wid = a;
         }
         else vocab[wid].cn++;
-
-        if (vocab_size > vocab_hash_size * 0.7) ReduceVocab();
-        if (methodnum >= 2)
-        {
-            if(train_words > window)
-            {
-                for(j = 1; j <= window; j++)
-                {
-                    //to is the id of u in words arrary
-                    int to = (train_words % window - j + window ) % window;
-
-                    //build w_u pair
-                    strcpy(tmp, word);
-                    strcpy(tmp + strlen(tmp), "_");
-                    strcpy(tmp + strlen(tmp), words[to]);
-
-                    //build u_w pair
-                    strcpy(tmp2, words[to]);
-                    strcpy(tmp2 + strlen(tmp2), "_");
-                    strcpy(tmp2 + strlen(tmp2), word);
-
-                    wid = SearchVocab(word, 1);
-                    vocab[wid].cwu++;
-
-                    uid = SearchVocab(words[to], 1);
-                    if(uid == -1)
-                    {
-                        uid = AddWordToVocab(words[to], 1);
-                        vocab[uid].cwu++;
-                    }
-                    else vocab[uid].cwu++;
-
-                    w_uid = SearchVocab(tmp, 2);
-                    if (w_uid == -1)
-                    {
-                        w_uid = AddWordToVocab(tmp, 2);
-                        pair[w_uid].cn = 1;
-                        cnt++;
-                        node *NEXT = (struct node*)malloc(sizeof(struct node));
-                        NEXT->next = vocab[wid].next;
-                        vocab[wid].next = NEXT;
-                        NEXT->wordid = uid;
-                        NEXT->stringid = w_uid;
-                    }
-                    else pair[w_uid].cn++;
-
-                    u_wid = SearchVocab(tmp2, 2);
-                    if (u_wid == -1)
-                    {
-                        u_wid = AddWordToVocab(tmp2, 2);
-                        pair[u_wid].cn = 1;
-                        cnt++;
-                        node *NEXT = (struct node*)malloc(sizeof(struct node));
-                        NEXT->next = vocab[uid].next;
-                        vocab[uid].next = NEXT;
-                        NEXT->wordid = wid;
-                        NEXT->stringid = u_wid;
-                    }
-                    else pair[u_wid].cn++;
-
-                    pairnum += 2;
-                }
-            }
-            strcpy(words[train_words % window], word);
-        }
     }
     file_size += ftell(fin);
     fclose(fin);
-
 }
-
 void dir_scan(const char *path, const char *file)
 {
     struct stat s;
@@ -579,18 +380,16 @@ void LearnVocabFromTrainFile()
     char curdir[PATH_LEN];
     long long a;
     for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
-    for (a = 0; a < vocab_hash_size << 3; a++) pair_hash[a] = -1;
     vocab_size = 0;
     pair_size = 0;
-    pairnum = 0;
-    AddWordToVocab((char *)"</s>", 1);
+    AddWordToVocab((char *)"</s>");
 
     if(Union_file[0] == 0 && train_file[0] == 0){
         printf("Union file doesn't exist!");
         exit(0);
     }
     if(Union_file[0]!=0)funion = fopen64(Union_file,"wb");
-    
+
     if(Dir_name[0] == 0){
         Create_Table(train_file);
     }else {
@@ -606,17 +405,8 @@ void LearnVocabFromTrainFile()
     if(Union_file[0] != 0)fclose(funion);
     SortVocab();
     printf("SortVocab!!\n");
-
-    if(methodnum >= 2)
-    {
-        CalWeight();
-        printf("CalWeight!!\n");
-    }
-    if (debug_mode > 0)
-    {
-        printf("Vocab size: %lld\n", vocab_size);
-        printf("Words in train file: %lld\n", train_words);
-    }
+    printf("Vocab size: %lld\n", vocab_size);
+    printf("Words in train file: %lld\n", train_words);
 }
 
 void SaveVocab()
@@ -644,16 +434,13 @@ void ReadVocab()
     {
         ReadWord(word, fin,&eof);
         if (eof) break;
-        a = AddWordToVocab(word, 1);
+        a = AddWordToVocab(word);
         fscanf(fin, "%lld%c", &vocab[a].cn, &c);
         i++;
     }
     SortVocab();
-    if (debug_mode > 0)
-    {
-        printf("Vocab size: %lld\n", vocab_size);
-        printf("Words in train file: %lld\n", train_words);
-    }
+    printf("Vocab size: %lld\n", vocab_size);
+    printf("Words in train file: %lld\n", train_words);
     fin = fopen64(train_file, "rb");
     if (fin == NULL)
     {
@@ -679,7 +466,7 @@ void *TrainModel(void *id)
     FILE *fi;
     if(Union_file[0] == 0)
     {
-	fi = fopen64(train_file,"rb");
+        fi = fopen64(train_file,"rb");
     }
     else fi = fopen64(Union_file, "rb");
     fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
@@ -739,7 +526,7 @@ void *TrainModel(void *id)
         next_random = next_random * (unsigned long long)25214903917 + 11;
         b = next_random % window;
 
-        for (a = b; a < window * 2 + 1 - b; a++) if (a != window) 
+        for (a = b; a < window * 2 + 1 - b; a++) if (a != window)
         {
             c = sentence_position - window + a;
             if (c < 0) continue;
@@ -788,6 +575,40 @@ void *TrainModel(void *id)
     pthread_exit(NULL);
 }
 
+void ReadPairInformation(){
+    long long a, i = 0;
+    char c, eof = 0;
+    char word[MAX_STRING];
+    FILE *fin = fopen64(pairfile, "rb");
+    if (fin == NULL)
+    {
+        printf("pairfile not found\n");
+        exit(1);
+    }
+    for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
+    vocab_size = 0;
+    while (1)
+    {
+        ReadWord(word, fin,&eof);
+        if (eof) break;
+        a = AddWordToVocab(word);
+        fscanf(fin, "%lld %lf%c", &vocab[a].cn,&vocab[a].w,&c);
+        i++;
+    }
+    SortVocab();
+    printf("Vocab size: %lld\n", vocab_size);
+    printf("Words in train file: %lld\n", train_words);
+    fin = fopen64(train_file, "rb");
+    if (fin == NULL)
+    {
+        printf("ERROR: training data file not found!\n");
+        exit(1);
+    }
+    fseek(fin, 0, SEEK_END);
+    file_size += ftell(fin);
+    fclose(fin);
+}
+
 void Train()
 {
     long a,b,c,d;
@@ -798,10 +619,13 @@ void Train()
     else printf("Starting training using files in %s\n", Dir_name);
     starting_alpha = alpha;
 
-    printf("LearnVocabFromTrainFile\n");
-    if (read_vocab_file[0] != 0) ReadVocab();
+    if(methodnum >=2 ){
+        if(pairfile[0] == 0){
+            printf("PairFile is not found\n");
+        }
+        else ReadPairInformation();
+    }else if (read_vocab_file[0] != 0) ReadVocab();
     else LearnVocabFromTrainFile();
-    printf("Learning Finished\n");
 
     if (save_vocab_file[0] != 0) SaveVocab();
     if (output_file[0] == 0) return;
@@ -864,6 +688,8 @@ int main(int argc,char **argv)
         printf("\t\tUse all data from <dir> to train the model\n");
         printf("\t-union <file>\n");
         printf("\t\tUnion all data from <dir> to <file>\n");
+        printf("\t-pairfile <file>\n");
+        printf("\t\tRead pair information from <file> to train model\n");
         printf("\t-train <file>\n");
         printf("\t\tUse text data from <file> to train the model\n");
         printf("\t-output <file>\n");
@@ -907,8 +733,10 @@ int main(int argc,char **argv)
     Dir_name[0] = 0;
     methodnum = 1;
     threshold = 0.7;
+    pairfile[0] = 0;
 
     if ((i = ArgPos((char *)"-size", argc, argv)) > 0) layer1_size = atoi(argv[i + 1]);
+    if ((i = ArgPos((char *)"-pairfile", argc, argv)) > 0) strcpy(pairfile,argv[i + 1]);
     if ((i = ArgPos((char *)"-train", argc, argv)) > 0) strcpy(train_file, argv[i + 1]);
     if ((i = ArgPos((char *)"-save-vocab", argc, argv)) > 0) strcpy(save_vocab_file, argv[i + 1]);
     if ((i = ArgPos((char *)"-read-vocab", argc, argv)) > 0) strcpy(read_vocab_file, argv[i + 1]);
@@ -948,9 +776,7 @@ int main(int argc,char **argv)
     }
 
     vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word));
-    pair = (struct vocab_word *)calloc(pair_max_size, sizeof(struct vocab_word));
     vocab_hash = (int *)calloc(vocab_hash_size, sizeof(int));
-    pair_hash = (int *)calloc(vocab_hash_size << 3, sizeof(int));
     expTable = (double *)malloc((EXP_TABLE_SIZE + 1) * sizeof(double));
 
     for (i = 0; i < EXP_TABLE_SIZE; i++)
