@@ -16,58 +16,114 @@ class sgns_word_count {
 	public static long pair_num;
 	public static long Outputnum;
 	public static long window_size = 5;
+	public static long min_reduce = 10;
 	public static HashMap<String, Long> w_ucount = new HashMap<String, Long>();
 	public static HashMap<String, Long> wordcount = new HashMap<String, Long>();
 	public static HashMap<String, Double> wordweight = new HashMap<String, Double>();
+	public static HashMap<String, Integer> tempword = new HashMap<String, Integer>();
+	public static HashMap<Integer, Long> doclines = new HashMap<Integer, Long>();
 	public static String Method;
 	
 	public static void main(String[] args) throws Exception {
     	long startTime = System.currentTimeMillis(); 
-    	Pattern pattern = Pattern.compile("[0-9]*");
     	word_num = 0;
     	Outputnum = 0;
     	Method = "IG";
-    	for(int i=0;i<args.length;i++) {
-    		if(args[i] == "-train") {
-    			trainingDataFilePath = args[i+1];
-    		}
-    		if(args[i] == "-model") {
-    			modelFilePath = args[i+1];
-    		}
-    		if(args[i] == "-ouput") {
-    			outputFilePath = args[i+1];
-    		}
-    		if(args[i] == "-window") {
-    			Matcher isNum = pattern.matcher(args[i+1]);
-    			if( !isNum.matches() ){
-    				System.out.println("loss parameters!\n");
-    				return;
-    	        }
-    			window_size = Integer.parseInt(args[i+1]);
-    		}
-    		if(args[i] == "-method") {
-    			if(args[i+1] == "IG" 
-    					|| args[i+1] == "MI"
-    					|| args[i+1] == "CHI") {
-    				Method = args[i+1];
-    			}else {
-    				System.out.println("False parameters!\n");
-    				return;
-    			}
-    		}
-    	}
+    	//Readpair();
     	LearnVocabFromCorpus();
     	LearnFromCorpus();
         long endTime = System.currentTimeMillis(); 
         System.out.println("程序运行时间：" + (endTime - startTime) + "ms");
     }
+	
+	public static void Readpairnum() {
+		long cc=0;
+		for(int i=0;i<=Outputnum;i++) {
+			System.out.println("Reading Outputdoc"+i +" Start\n");
+			cc=0;
+			try {
+				FileInputStream inputstream = new FileInputStream(outputFilePath+i);
+				BufferedReader bufferreader = new BufferedReader(new InputStreamReader(inputstream,"UTF-8"));
+				String line;
+				line = bufferreader.readLine();
+				while(line!=null) {
+					cc++;
+					String [] words = line.split(" |\t");
+					pair_num+=Long.parseLong(words[3]);
+					line = bufferreader.readLine(); 
+				}
+				inputstream.close();
+			}catch (IOException e) {
+				e.printStackTrace();
+			}
+			System.out.println("Reading Outputdoc"+i + " Finished!\n");
+			doclines.put(i, cc);
+		}
+	}
+	
+	public static void FILESREAD_CAL() {
+		long cc=0;
+		for(int i=0;i<=Outputnum;i++) {
+			System.out.println("Reading Outputdoc"+i +" Start\n");
+			try {
+				FileInputStream inputstream = new FileInputStream(outputFilePath+i);
+				BufferedReader bufferreader = new BufferedReader(new InputStreamReader(inputstream,"UTF-8"));
+				String line;
+				line = bufferreader.readLine();
+				while(line!=null) {
+					cc++;
+					if(cc % 1000000 == 0) {
+						System.out.println("\tHas Read " + cc * 1.0 / doclines.get(i) + "%\n");
+					}
+					String [] words = line.split(" |\t");
+					if(tempword.get(words[0]) != null) {
+						String tem = words[0] + " " + words[1];
+						long value = Long.parseLong(words[3]);
+						if(w_ucount.get(tem) == null) w_ucount.put(tem, value);
+						else w_ucount.put(tem, w_ucount.get(tem) + 1L);
+					}
+					line = bufferreader.readLine(); 
+				}
+				inputstream.close();
+			}catch (IOException e) {
+				e.printStackTrace();
+			}
+			System.out.println("Reading Outputdoc"+i + " Finished!\n");
+		}
+		calweight();
+	}
+	
+	public static void Readpair() {
+		Outputnum = 5;
+		w_ucount.clear();
+		Readpairnum();
+		long cnt = 0;
+		Iterator<String> keyIter = wordcount.keySet().iterator();
+		while (keyIter.hasNext()) {
+			String key = keyIter.next();
+			tempword.put(key, 1);
+			cnt += wordcount.get(key);
+			if(cnt * 1.0 / word_num > 1.0 / (Outputnum * 2)) {
+				FILESREAD_CAL();
+				cnt=0;
+				tempword.clear();
+				w_ucount.clear();
+			}
+		}
+		if(cnt!=0) {
+			FILESREAD_CAL();
+			tempword.clear();
+			w_ucount.clear();
+		}
+	}
+	
 	public static void calweight()
 	{
 		Iterator<String> keyIter = w_ucount.keySet().iterator();
 		while (keyIter.hasNext()) {
             String key = keyIter.next();
             String[] tem = key.split(" ");
-        	if(wordcount.get(tem[0]) < 5 || wordcount.get(tem[1]) < 5) continue;
+        	if(wordcount.get(tem[0]) < min_reduce || wordcount.get(tem[1]) < min_reduce) continue;
             
         	if(wordweight.get(tem[0]) == null) {
         		wordweight.put(tem[0], 0.0);
@@ -172,8 +228,8 @@ class sgns_word_count {
 			while(line!=null) {
 				String [] words = line.split("\\ |\t");
 				for(int i=0;i<words.length;i++) {
-					if(word_num % 100000 == 0) {
-						System.out.print("\tword_num : " + word_num/1000 + "K " +"\n");
+					if(word_num % 1000000 == 0) {
+						System.out.print("\tword_num : " + word_num/1000000 + "M " +"\n");
 					}
 					if(wordcount.get(words[i]) == null) wordcount.put(words[i],1L);
 					else wordcount.put(words[i],wordcount.get(words[i])+1L);
@@ -200,15 +256,15 @@ class sgns_word_count {
 			while(line!=null) {
 				String [] words = line.split("\\ |\t");
 				for(int i=0;i<words.length;i++) {
-					if(wordcount.get(words[i]) < 5) continue;
-					if(num % 100000 == 0) {
+					if(wordcount.get(words[i]) < min_reduce) continue;
+					if(num % 1000000 == 0) {
 						long endTime2 = System.currentTimeMillis();
 						long TIME = endTime2 - startTime2;
-						if(TIME > 60000) {
+						if(TIME > 600000) {
 							System.out.println("output");
 							OutputPair();
 						}
-						System.out.print("\tword_num : " + num/1000 + "K " + "pair_num : " + w_ucount.size() +"\n");
+						System.out.print("\tword_num : " + num/100000 + "M " + "pair_num : " + w_ucount.size() +"\n");
 						startTime2 = System.currentTimeMillis(); 
 					}
 					if(words.length - i <= window_size) {
@@ -222,7 +278,7 @@ class sgns_word_count {
 							}
 							else {
 								uid = uid + (int)window_size;
-								if(wordcount.get(circur[uid]) == null || wordcount.get(circur[uid]) <5) continue;
+								if(wordcount.get(circur[uid]) == null || wordcount.get(circur[uid]) <min_reduce) continue;
 								String tem = words[i]+" "+circur[uid];
 								if(w_ucount.get(tem) == null) w_ucount.put(tem,1L);
 								else w_ucount.put(tem,w_ucount.get(tem)+1);
@@ -234,7 +290,7 @@ class sgns_word_count {
 								continue;
 							}
 						}
-						if(wordcount.get(words[uid]) < 5) continue;
+						if(wordcount.get(words[uid]) < min_reduce) continue;
 						String tem = words[i]+" "+words[uid];
 						if(w_ucount.get(tem) == null) w_ucount.put(tem,1L);
 						else w_ucount.put(tem,w_ucount.get(tem)+1);
