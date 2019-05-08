@@ -174,7 +174,7 @@ class sgns_word_count {
         	String key = OutIter.next();
         	double value = wordweight.get(key);
         	long count = wordcount.get(key);
-        	if(count < 5) continue;
+        	if(count < min_reduce) continue;
         	try {
         		bw.append(key + "\t" + count +"\t" + value + "\r\n");
             } catch (IOException e) {
