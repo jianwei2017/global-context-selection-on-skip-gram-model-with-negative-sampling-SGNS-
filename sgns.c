@@ -179,57 +179,29 @@ void SortVocab()
 {
     Delete = (int *)calloc(vocab_size,sizeof(int));
     for(int i=0;i<vocab_size;i++) Delete[i] = 0;
-    if(methodnum == 1)
+    int a, size;
+    unsigned int hash;
+    qsort(&vocab[1], vocab_size - 1, sizeof(struct vocab_word), VocabCompare);
+    for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
+    size = vocab_size;
+    train_words = 0;
+    for (a = 0; a < size; a++)
     {
-        int a, size;
-        unsigned int hash;
-        qsort(&vocab[1], vocab_size - 1, sizeof(struct vocab_word), VocabCompare);
-        for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
-        size = vocab_size;
-        train_words = 0;
-        for (a = 0; a < size; a++)
+        if ((vocab[a].cn < min_count) && (a != 0))
         {
-            if ((vocab[a].cn < min_count) && (a != 0))
-            {
-                vocab_size--;
-                free(vocab[a].word);
-            }
-            else
-            {
-                hash=GetWordHash(vocab[a].word);
-                while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
-                vocab_hash[hash] = a;
-                train_words += vocab[a].cn;
-            }
+            Delete[a] = 1;
+            vocab_size--;
+            free(vocab[a].word);
         }
-        vocab = (struct vocab_word *)realloc(vocab, (vocab_size + 1) * sizeof(struct vocab_word));
-    }
-    else if(methodnum >= 2)
-    {
-        int a, size;
-        unsigned int hash;
-        qsort(&vocab[1], vocab_size - 1, sizeof(struct vocab_word), VocabCompare);
-        for (a = 0; a < vocab_hash_size; a++) vocab_hash[a]  = -1;
-        size = vocab_size;
-        train_words = 0;
-        for (a = 0; a < size; a++)
+        else
         {
-            if ((vocab[a].cn < min_count) && (a != 0))
-            {
-                Delete[a]=1;
-                vocab_size--;
-                free(vocab[a].word);
-            }
-            else
-            {
-                hash = GetWordHash(vocab[a].word);;
-                while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
-                vocab_hash[hash] = a;
-                train_words += vocab[a].cn;
-            }
+            hash=GetWordHash(vocab[a].word);
+            while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
+            vocab_hash[hash] = a;
+            train_words += vocab[a].cn;
         }
-        vocab = (struct vocab_word *)realloc(vocab, (vocab_size + 1) * sizeof(struct vocab_word));
     }
+    vocab = (struct vocab_word *)realloc(vocab, (vocab_size + 1) * sizeof(struct vocab_word));
 }
 
 void ReduceVocab() {
@@ -301,9 +273,9 @@ void Create_Table(char *filename){
         };
         if (eof) break;
         train_words++;
-        if ((train_words % 100000 == 0))
+        if ((train_words % 1000000 == 0))
         {
-            printf("words:%lldKvaocab:%lld%c", train_words / 1000, vocab_size, 13);
+            printf("words:%lldMvaocab:%lld%c", train_words / 1000000, vocab_size, 13);
             fflush(stdout);
         }
         wid = SearchVocab(word);
@@ -311,6 +283,7 @@ void Create_Table(char *filename){
         {
             a = AddWordToVocab(word);
             vocab[a].cn = 1;
+            vocab[a].w = 0;
             wid = a;
         }
         else vocab[wid].cn++;
@@ -404,9 +377,6 @@ void LearnVocabFromTrainFile()
     }
     if(Union_file[0] != 0)fclose(funion);
     SortVocab();
-    printf("SortVocab!!\n");
-    printf("Vocab size: %lld\n", vocab_size);
-    printf("Words in train file: %lld\n", train_words);
 }
 
 void SaveVocab()
@@ -576,7 +546,9 @@ void *TrainModel(void *id)
 }
 
 void ReadPairInformation(){
-    long long a, i = 0;
+    long long a;
+    long long tem = 0;
+    double temw = 0;
     char c, eof = 0;
     char word[MAX_STRING];
     FILE *fin = fopen64(pairfile, "rb");
@@ -585,28 +557,22 @@ void ReadPairInformation(){
         printf("pairfile not found\n");
         exit(1);
     }
-    for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
-    vocab_size = 0;
+    fscanf(fin, "%lld%lf\n", &tem, &temw);
     while (1)
     {
-        ReadWord(word, fin,&eof);
+        ReadWord(word, fin, &eof);
         if (eof) break;
-        a = AddWordToVocab(word);
-        fscanf(fin, "%lld %lf%c", &vocab[a].cn,&vocab[a].w,&c);
-        i++;
+        //printf("word:%s\n",word);
+        a = SearchVocab(word);
+        if(a == -1) {
+            a = AddWordToVocab(word);
+        }
+        //printf("word:%s id: %lld\n",word,a);
+        fscanf(fin, "%lld\t%lf\n", &vocab[a].cn,&vocab[a].w);
     }
     SortVocab();
     printf("Vocab size: %lld\n", vocab_size);
     printf("Words in train file: %lld\n", train_words);
-    fin = fopen64(train_file, "rb");
-    if (fin == NULL)
-    {
-        printf("ERROR: training data file not found!\n");
-        exit(1);
-    }
-    fseek(fin, 0, SEEK_END);
-    file_size += ftell(fin);
-    fclose(fin);
 }
 
 void Train()
@@ -619,17 +585,19 @@ void Train()
     else printf("Starting training using files in %s\n", Dir_name);
     starting_alpha = alpha;
 
+    if (read_vocab_file[0] != 0) ReadVocab();
+    else LearnVocabFromTrainFile();
+
+    printf("Vocab Read Finished, The total words : %lld\n",train_words);
     if(methodnum >=2 ){
         if(pairfile[0] == 0){
             printf("PairFile is not found\n");
         }
         else ReadPairInformation();
-    }else if (read_vocab_file[0] != 0) ReadVocab();
-    else LearnVocabFromTrainFile();
+    }
 
     if (save_vocab_file[0] != 0) SaveVocab();
     if (output_file[0] == 0) return;
-
     InitNet();
     InitUnigramTable();
     start = clock();
