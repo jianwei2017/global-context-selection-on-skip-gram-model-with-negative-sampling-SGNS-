@@ -1,12 +1,5 @@
 import java.io.*;
-import java.net.URI;
-import java.nio.charset.Charset;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern; 
 
 class sgns_word_count {
 	private static String trainingDataFilePath = "F:\\word2vec\\rel\\unionfile";
@@ -39,6 +32,12 @@ class sgns_word_count {
         long endTime = System.currentTimeMillis(); 
         System.out.println("程序运行时间：" + (endTime - startTime) + "ms");
     }
+	
+	//public static void main(String[] args)throws Eception {
+		//long startTime = System.currentTimeMillis();
+		//word_num = 0;
+		//Outputnum = 0;
+	//}
 	
 	public static void Readpairnum() {
 		long cc=0;
@@ -160,7 +159,7 @@ class sgns_word_count {
 	        		double pu = wordcount.get(tem[1]) * 1.0 / word_num;
 	        		double p_w = 1 - pw;
 	        		double puw = (w_ucount.get(key)*1.0 / pair_num) / pw;
-	        		double pu_w = (wordcount.get(tem[1]) - w_ucount.get(key) * 1.0 / pair_num) / p_w;
+	        		double pu_w = ((wordcount.get(tem[1]) - w_ucount.get(key) * 1.0) / pair_num) / p_w;
 	        		double IG = -pu * Math.log(pu) + pw * puw * Math.log(puw) + p_w * pu_w *Math.log(pu_w);
 	        		wordIG.put(tem[0], wordIG.get(tem[0])+IG);
 	        	}
@@ -170,7 +169,7 @@ class sgns_word_count {
 	        		long B = wordcount.get(tem[0]) - A;
 	        		long C = wordcount.get(tem[1]) - A;
 	        		long N = pair_num;
-	        		double MI = Math.log(A * N * 1.0 / (A + C) * (A + B));
+	        		double MI = Math.log(A * N * 1.0 / ((A + C) * (A + B)));
 	        		wordMI.put(tem[0], wordMI.get(tem[0])+MI);
 	        	}
 	        	//CHI
