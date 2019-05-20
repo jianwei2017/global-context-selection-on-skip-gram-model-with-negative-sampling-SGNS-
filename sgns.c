@@ -464,7 +464,6 @@ void *TrainModel(void *id)
                 word = ReadWordIndex(fi,&eof);
                 if (eof) break;
                 if (word == -1) continue;
-                if (methodnum >= 2) if (vocab[word].w < min_weight) continue;
                 word_count++;
                 if (word == 0) break;
                 double ran = (sqrt(vocab[word].cn / (sample * train_words)) + 1) * (sample * train_words) / vocab[word].cn;
@@ -503,6 +502,7 @@ void *TrainModel(void *id)
             if (c >= sentence_length) continue;
             last_word = sen[c];
             if (last_word == -1) continue;
+            if (methodnum >= 2) if (vocab[last_word].w < min_weight) continue;
             l1 = last_word * layer1_size;
             for (c = 0; c < layer1_size; c++) neu1e[c] = 0;
 
