@@ -84,7 +84,7 @@ void ReadWord(char *word, FILE *fin, char *eof)
     int a = 0, ch;
     while (1)
     {
-        ch = fgetc_unlocked(fin);
+        ch = getc_unlocked(fin);
         if (ch == EOF)
         {
             *eof = 1;
@@ -255,7 +255,7 @@ void Create_Table(char *filename){
     char tmp2[(MAX_SENTENCE_LENGTH<<2) + 1];
     long long a, wid, j,uid,w_uid,u_wid;
     FILE *fin;
-    fin = fopen64(filename, "rb");
+    fin = fopen(filename, "rb");
     if (fin == NULL)
     {
         printf("ERROR: %s not found!\n",filename);
@@ -361,7 +361,7 @@ void LearnVocabFromTrainFile()
         printf("Union file doesn't exist!");
         exit(0);
     }
-    if(Union_file[0]!=0)funion = fopen64(Union_file,"wb");
+    if(Union_file[0]!=0)funion = fopen(Union_file,"wb");
 
     if(Dir_name[0] == 0){
         Create_Table(train_file);
@@ -382,7 +382,7 @@ void LearnVocabFromTrainFile()
 void SaveVocab()
 {
     long long i;
-    FILE *fo = fopen64(save_vocab_file, "wb");
+    FILE *fo = fopen(save_vocab_file, "wb");
     for (i = 0; i < vocab_size; i++) fprintf(fo, "%s %lld\n", vocab[i].word, vocab[i].cn);
     fclose(fo);
 }
@@ -392,7 +392,7 @@ void ReadVocab()
     long long a, i = 0;
     char c, eof = 0;
     char word[MAX_STRING];
-    FILE *fin = fopen64(read_vocab_file, "rb");
+    FILE *fin = fopen(read_vocab_file, "rb");
     if (fin == NULL)
     {
         printf("Vocabulary file not found\n");
@@ -411,7 +411,7 @@ void ReadVocab()
     SortVocab();
     printf("Vocab size: %lld\n", vocab_size);
     printf("Words in train file: %lld\n", train_words);
-    fin = fopen64(train_file, "rb");
+    fin = fopen(train_file, "rb");
     if (fin == NULL)
     {
         printf("ERROR: training data file not found!\n");
@@ -436,9 +436,9 @@ void *TrainModel(void *id)
     FILE *fi;
     if(Union_file[0] == 0)
     {
-        fi = fopen64(train_file,"rb");
+        fi = fopen(train_file,"rb");
     }
-    else fi = fopen64(Union_file, "rb");
+    else fi = fopen(Union_file, "rb");
     fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
 
     while(1)
@@ -551,7 +551,7 @@ void ReadPairInformation(){
     double temw = 0;
     char c, eof = 0;
     char word[MAX_STRING];
-    FILE *fin = fopen64(pairfile, "rb");
+    FILE *fin = fopen(pairfile, "rb");
     if (fin == NULL)
     {
         printf("pairfile not found\n");
@@ -605,7 +605,7 @@ void Train()
     for (a = 0; a < num_threads; a++) pthread_join(pt[a], NULL);
 
 
-    fo = fopen64(output_file, "wb");
+    fo = fopen(output_file, "wb");
 
     // Save the word vectors
     fprintf(fo, "%lld %lld\n", vocab_size, layer1_size);
