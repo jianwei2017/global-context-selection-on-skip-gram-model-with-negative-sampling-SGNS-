@@ -31,7 +31,7 @@ char Union_file[MAX_STRING];
 char save_vocab_file[MAX_STRING],read_vocab_file[MAX_STRING];
 struct vocab_word *vocab;
 
-int window = 5,min_count = 5,num_threads = 12,num_reduce =1,min_reduce=1;
+int window = 5,min_count = 5,num_threads = 12,min_reduce=5;
 int debug_mode = 2;
 int *vocab_hash;
 long long vocab_max_size=1000,vocab_size=0,layer1_size=100;
@@ -45,6 +45,7 @@ const int table_size = 1e8;
 int *table;
 int methodnum;
 char pairfile[MAX_STRING];
+char *jiluaddress;
 long long pairnum;
 int pair_size;
 int *Delete;
@@ -53,7 +54,7 @@ double *weights;
 double min_weight;
 double threshold;
 FILE *funion;
-
+FILE *jilu;
 
 void InitUnigramTable()
 {
@@ -127,7 +128,7 @@ int SearchVocab(char *word)
     {
         if (vocab_hash[hash] == -1) return -1;
         if (!strcmp(word, vocab[vocab_hash[hash]].word)) return vocab_hash[hash];
-	    hash = (hash + 1) % vocab_hash_size;
+        hash = (hash + 1) % vocab_hash_size;
     }
     return -1;
 }
@@ -202,6 +203,7 @@ void SortVocab()
         }
     }
     vocab = (struct vocab_word *)realloc(vocab, (vocab_size + 1) * sizeof(struct vocab_word));
+
 }
 
 void ReduceVocab() {
@@ -376,7 +378,6 @@ void LearnVocabFromTrainFile()
 
     }
     if(Union_file[0] != 0)fclose(funion);
-    SortVocab();
 }
 
 void SaveVocab()
@@ -434,13 +435,13 @@ void *TrainModel(void *id)
     double *neu1 = (double *)calloc(layer1_size, sizeof(double));
     double *neu1e = (double *)calloc(layer1_size, sizeof(double));
     FILE *fi;
+    int cnt = 0;
     if(Union_file[0] == 0)
     {
         fi = fopen(train_file,"rb");
     }
     else fi = fopen(Union_file, "rb");
     fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
-
     while(1)
     {
         if (word_count - last_word_count > 10000)
@@ -475,7 +476,6 @@ void *TrainModel(void *id)
             }
             sentence_position = 0;
         }
-
         if (eof || (word_count > train_words / num_threads))
         {
             word_count_actual += word_count - last_word_count;
@@ -492,8 +492,9 @@ void *TrainModel(void *id)
         if (word == -1) continue;
         for (c = 0; c < layer1_size; c++) neu1[c] = 0;
         for (c = 0; c < layer1_size; c++) neu1e[c] = 0;
-        next_random = next_random * (unsigned long long)25214903917 + 11;
-        b = next_random % window;
+        //next_random = next_random * (unsigned long long)25214903917 + 11;
+        //b = next_random % window;
+        b = 0;
 
         for (a = b; a < window * 2 + 1 - b; a++) if (a != window)
         {
@@ -502,7 +503,7 @@ void *TrainModel(void *id)
             if (c >= sentence_length) continue;
             last_word = sen[c];
             if (last_word == -1) continue;
-            if (methodnum >= 2) if (vocab[last_word].w < min_weight) continue;
+            if(methodnum>=2) if (vocab[last_word].w < min_weight) continue;
             l1 = last_word * layer1_size;
             for (c = 0; c < layer1_size; c++) neu1e[c] = 0;
 
@@ -562,17 +563,27 @@ void ReadPairInformation(){
     {
         ReadWord(word, fin, &eof);
         if (eof) break;
-        //printf("word:%s\n",word);
         a = SearchVocab(word);
         if(a == -1) {
             a = AddWordToVocab(word);
         }
-        //printf("word:%s id: %lld\n",word,a);
         fscanf(fin, "%lld\t%lf\n", &vocab[a].cn,&vocab[a].w);
     }
-    SortVocab();
     printf("Vocab size: %lld\n", vocab_size);
     printf("Words in train file: %lld\n", train_words);
+}
+
+void Findthreshold(){
+    long long index = 0;
+    weights = (double *)malloc(vocab_size * sizeof(double));
+    for(int i=0;i<vocab_size;i++){
+        if(vocab[i].cn<min_count)continue;
+        if(methodnum >=2) weights[index++] = vocab[i].w;
+        else weights[index++] = vocab[i].cn;
+    }
+    qsort(&weights[1], vocab_size-1, sizeof(double), WeightsCompare);
+    long long position = ceil(threshold * vocab_size);
+    min_weight = weights[position];
 }
 
 void Train()
@@ -595,9 +606,11 @@ void Train()
         }
         else ReadPairInformation();
     }
-
     if (save_vocab_file[0] != 0) SaveVocab();
     if (output_file[0] == 0) return;
+
+    Findthreshold();
+    SortVocab();
     InitNet();
     InitUnigramTable();
     start = clock();
@@ -702,6 +715,7 @@ int main(int argc,char **argv)
     methodnum = 1;
     threshold = 0.7;
     pairfile[0] = 0;
+    strcpy(train_file,"unionfile");
 
     if ((i = ArgPos((char *)"-size", argc, argv)) > 0) layer1_size = atoi(argv[i + 1]);
     if ((i = ArgPos((char *)"-pairfile", argc, argv)) > 0) strcpy(pairfile,argv[i + 1]);
@@ -754,5 +768,10 @@ int main(int argc,char **argv)
     }
     Train();
     printf("Training Finished\n");
+    jiluaddress = (char *)malloc(MAX_SENTENCE_LENGTH * sizeof(char));
+    strcpy(jiluaddress,"information");
+    jilu = fopen(jiluaddress,"at");
+    clock_t now = clock();
+    fprintf(jilu,"Name: %s Time: %lf Vw: %lld Vc: %lld\n",output_file, (now - start) * 1.0/ 1000000 / 60, (long long)(ceil(vocab_size * threshold)), vocab_size);
     return 0;
 }
